@@ -19,12 +19,15 @@ Date: 2025-01-20
 
 import json
 import logging
+import random
+import re
 import sys
 import time
-import random
-from typing import List, Dict, Any
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, unquote, urlparse
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
@@ -33,7 +36,7 @@ sys.path.insert(0, str(project_root))
 from notification import send_notification, NotificationSound
 
 # 导入API模块（当前目录）
-from api import SFExpressAPI
+from api import SFExpressAPI, ShareLoginInfo
 
 # 延迟时间常量配置 (秒)
 DELAY_BETWEEN_ACCOUNTS = (3, 8)      # 账号间切换延迟
@@ -46,6 +49,46 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SFAccountConfig:
+    """顺丰账号配置"""
+
+    account_name: str
+    sign: str
+    user_agent: str
+    channel: str
+    device_id: str
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SFAccountConfig":
+        """从配置字典构建账号配置"""
+        account_name = data.get("account_name") or "未命名账号"
+        sign = data.get("sign") or ""
+        user_agent = data.get("user_agent") or ""
+        channel = data.get("channel") or ""
+        device_id = data.get("device_id") or ""
+
+        missing_fields = []
+        if not sign:
+            missing_fields.append("sign")
+        if not channel:
+            missing_fields.append("channel")
+        if not device_id:
+            missing_fields.append("device_id")
+
+        if missing_fields:
+            missing_text = "、".join(missing_fields)
+            raise ValueError(f"账号【{account_name}】缺少必填字段: {missing_text}")
+
+        return cls(
+            account_name=account_name,
+            sign=sign,
+            user_agent=user_agent,
+            channel=channel,
+            device_id=device_id
+        )
 
 
 class SFTasksManager:
@@ -65,7 +108,7 @@ class SFTasksManager:
 
         self.config_path = config_path
         self.site_name = "顺丰速运"
-        self.accounts = []
+        self.accounts: List[SFAccountConfig] = []
         self.task_summary = []
         self.load_config()
 
@@ -77,8 +120,15 @@ class SFTasksManager:
                 config = json.load(f)
 
             # 获取顺丰的配置
-            sf_config = config.get('sf', {})
-            self.accounts = sf_config.get('accounts', [])
+            sf_config = config.get("sf", {})
+            raw_accounts = sf_config.get("accounts", [])
+
+            self.accounts = []
+            for raw_account in raw_accounts:
+                try:
+                    self.accounts.append(SFAccountConfig.from_dict(raw_account))
+                except ValueError as e:
+                    logger.error(f"账号配置异常: {e}")
 
             if not self.accounts:
                 logger.warning("配置文件中没有找到顺丰账号信息")
@@ -113,6 +163,78 @@ class SFTasksManager:
         except Exception as e:
             logger.error(f"获取任务列表失败: {e}")
             return []
+
+    @staticmethod
+    def extract_task_code(task: Dict[str, Any]) -> str:
+        """从任务信息中提取task_code"""
+        task_code = task.get("taskCode")
+        if task_code:
+            return task_code
+
+        button_redirect = task.get("buttonRedirect", "")
+        if not button_redirect:
+            return ""
+
+        decoded_redirect = unquote(button_redirect)
+        ug_param = ""
+
+        if "_ug_view_param=" in decoded_redirect:
+            ug_param = decoded_redirect.split("_ug_view_param=", 1)[1]
+        else:
+            for candidate in (button_redirect, decoded_redirect):
+                try:
+                    query = urlparse(candidate).query
+                    if not query:
+                        continue
+                    params = parse_qs(query)
+                    if params.get("_ug_view_param"):
+                        ug_param = params["_ug_view_param"][0]
+                        break
+                except Exception:
+                    continue
+
+        if not ug_param:
+            return ""
+
+        ug_param = unquote(ug_param).strip()
+
+        try:
+            ug_data = json.loads(ug_param)
+            if isinstance(ug_data, dict):
+                return ug_data.get("taskId", "")
+        except json.JSONDecodeError:
+            match = re.search(r'"taskId"\s*:\s*"([^"]+)"', ug_param)
+            if match:
+                return match.group(1)
+
+        return ""
+
+    def fetch_login_info(self, account: SFAccountConfig) -> Optional[ShareLoginInfo]:
+        """
+        获取账号登录信息（user_id + cookies）
+
+        Args:
+            account: 账号配置
+
+        Returns:
+            ShareLoginInfo | None: 登录信息
+        """
+        logger.info(f"[{account.account_name}] 开始请求分享登录接口")
+        login_info = SFExpressAPI.share_login(
+            sign=account.sign,
+            user_agent=account.user_agent or None
+        )
+
+        if not login_info.success:
+            logger.warning(f"[{account.account_name}] 分享登录失败: {login_info.error}")
+            return None
+
+        if not login_info.user_id or not login_info.cookies:
+            logger.warning(f"[{account.account_name}] 分享登录返回数据不完整")
+            return None
+
+        logger.info(f"[{account.account_name}] 分享登录成功，已获取用户信息")
+        return login_info
 
     def auto_sign_and_fetch_package(self, sf_api: SFExpressAPI, account_name: str) -> Dict[str, Any]:
         """
@@ -173,8 +295,7 @@ class SFTasksManager:
             Dict[str, Any]: 任务执行结果
         """
         task_title = task.get('title', '未知任务')
-        task_status = task.get("status")
-        task_code = task.get('taskCode')
+        task_code = self.extract_task_code(task)
 
         if not task_code:
             logger.warning(f"[{account_name}] 任务 {task_title} 缺少任务代码，跳过")
@@ -205,7 +326,7 @@ class SFTasksManager:
             logger.error(f"[{account_name}] 执行任务 {task_title} 时发生错误: {e}")
             return {'title': task_title, 'success': False, 'points': 0}
 
-    def process_account_tasks(self, account: Dict[str, Any]) -> Dict[str, Any]:
+    def process_account_tasks(self, account: SFAccountConfig) -> Dict[str, Any]:
         """
         处理单个账号的所有任务
 
@@ -215,12 +336,7 @@ class SFTasksManager:
         Returns:
             Dict[str, Any]: 账号任务执行统计
         """
-        cookies = account.get("cookies", "")
-        device_id = account.get("device_id", "")
-        user_id = account.get("user_id", "")
-        user_agent = account.get("user_agent", "")
-        channel = account.get("channel", "")
-        account_name = account.get("account_name", user_id)
+        account_name = account.account_name
 
         # 初始化账号统计
         account_stat = {
@@ -233,21 +349,26 @@ class SFTasksManager:
             'tasks': []
         }
 
-        if not all([cookies, user_id]):
-            logger.error(f"账号 {account_name} 配置信息不完整，跳过处理")
+        if not account.sign:
+            logger.error(f"账号 {account_name} 配置信息不完整，缺少sign，跳过处理")
             account_stat['error'] = '配置信息不完整'
             return account_stat
 
         logger.info(f"开始处理账号: {account_name}")
 
         try:
+            login_info = self.fetch_login_info(account)
+            if login_info is None:
+                account_stat['error'] = '分享登录失败'
+                return account_stat
+
             # 创建API实例
             sf_api = SFExpressAPI(
-                cookies=cookies,
-                device_id=device_id,
-                user_id=user_id,
-                user_agent=user_agent,
-                channel=channel
+                cookies=login_info.cookies,
+                device_id=account.device_id,
+                user_id=login_info.user_id,
+                user_agent=account.user_agent,
+                channel=account.channel
             )
 
             # 首先执行自动签到获取礼包
@@ -400,18 +521,18 @@ class SFTasksManager:
             logger.error(f"❌ 发送任务汇总推送失败: {str(e)}", exc_info=True)
 
 
+def log_task_header(title: str, timestamp: datetime) -> None:
+    """打印任务执行标题"""
+    logger.info("=" * 60)
+    logger.info(f"{title} - {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
+
+
 def main():
     """主函数"""
     # 记录开始时间
     start_time = datetime.now()
-    print(f"\n{'='*60}")
-    print(f"## 顺丰快递积分任务开始")
-    print(f"## 开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*60}\n")
-
-    logger.info("="*60)
-    logger.info(f"顺丰快递积分任务开始执行 - {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info("="*60)
+    log_task_header("顺丰快递积分任务开始执行", start_time)
 
     try:
         # 创建任务管理器
@@ -424,16 +545,10 @@ def main():
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
 
-        print(f"\n{'='*60}")
-        print(f"## 顺丰快递积分任务完成")
-        print(f"## 结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"## 执行耗时: {int(duration)} 秒")
-        print(f"{'='*60}\n")
-
-        logger.info("="*60)
+        logger.info("=" * 60)
         logger.info(f"顺丰快递积分任务执行完成 - {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"执行耗时: {int(duration)} 秒")
-        logger.info("="*60)
+        logger.info("=" * 60)
 
         # 发送推送通知
         if manager.task_summary:
@@ -447,13 +562,6 @@ def main():
 
         logger.error(f"任务执行异常: {str(e)}", exc_info=True)
 
-        print(f"\n{'='*60}")
-        print(f"## ❌ 任务执行异常")
-        print(f"## 错误信息: {str(e)}")
-        print(f"## 结束时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"## 执行耗时: {int(duration)} 秒")
-        print(f"{'='*60}\n")
-
         # 发送错误通知
         try:
             send_notification(
@@ -466,8 +574,8 @@ def main():
                 ),
                 sound=NotificationSound.ALARM
             )
-        except:
-            pass
+        except Exception:
+            logger.error("发送异常通知失败", exc_info=True)
 
         return 1
 
