@@ -61,5 +61,12 @@
     "url": "https://ntfy.sh",
     "topic": "",
     "priority": "3"
+  },
+  "email": {
+    "host": "smtp.qq.com",
+    "port": 465,
+    "user": "",
+    "pass": "",
+    "to": ""
   }
 }

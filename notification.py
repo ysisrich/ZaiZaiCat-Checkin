@@ -118,6 +118,7 @@ class NotificationManager:
         self.gotify_config = self._load_gotify_config()
         self.ntfy_config = self._load_ntfy_config()
         self.pushdeer_config = self._load_pushdeer_config()
+        self.email_config = self._load_email_config()
 
     def _load_config_from_file(self) -> Dict:
         """从JSON文件中加载配置"""
@@ -258,6 +259,16 @@ class NotificationManager:
             'type': self._get_config_value('pushdeer', 'type', 'PUSHDEER_TYPE', 'text'),
         }
 
+    def _load_email_config(self) -> Dict[str, Any]:
+        """加载邮件配置"""
+        return {
+            'host': self._get_config_value('email', 'host', 'EMAIL_HOST', 'smtp.qq.com'),
+            'port': int(self._get_config_value('email', 'port', 'EMAIL_PORT', 465)),
+            'user': self._get_config_value('email', 'user', 'EMAIL_USER', ''),
+            'pass': self._get_config_value('email', 'pass', 'EMAIL_PASS', ''),
+            'to': self._get_config_value('email', 'to', 'EMAIL_TO', ''),
+        }
+
     def is_bark_enabled(self) -> bool:
         """检查Bark推送是否已启用"""
         return bool(self.bark_config.get('push'))
@@ -315,6 +326,14 @@ class NotificationManager:
         """检查PushDeer推送是否已启用"""
         return bool(self.pushdeer_config.get('pushkey'))
 
+    def is_email_enabled(self) -> bool:
+        """检查邮件推送是否已启用"""
+        return bool(
+            self.email_config.get('user') and
+            self.email_config.get('pass') and
+            self.email_config.get('to')
+        )
+
     def send(self, title: str, content: str, level: Optional[str] = None,
              sound: Optional[str] = None, group: Optional[str] = None,
              url: Optional[str] = None, timeout: int = 10):
@@ -356,6 +375,8 @@ class NotificationManager:
             self.send_gotify_notification(title, content, timeout)
         if self.is_ntfy_enabled():
             self.send_ntfy_notification(title, content, timeout)
+        if self.is_email_enabled():
+            self.send_email_notification(title, content, timeout)
 
     def send_server_notification(self, title: str, content: str, timeout: int = 10) -> bool:
         """发送Server酱推送"""
@@ -713,6 +734,48 @@ class NotificationManager:
             return True
         except Exception as e:
             self.logger.error(f"❌ Ntfy推送异常: {e}")
+            return False
+
+    def send_email_notification(self, title: str, content: str, timeout: int = 10) -> bool:
+        """发送邮件推送"""
+        if not self.is_email_enabled():
+            self.logger.warning("邮件推送未启用")
+            return False
+
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.header import Header
+
+        host = self.email_config['host']
+        port = self.email_config['port']
+        user = self.email_config['user']
+        password = self.email_config['pass']
+        to_addr = self.email_config['to']
+
+        try:
+            self.logger.info("正在发送邮件推送")
+            
+            # 构造邮件内容
+            message = MIMEText(content, 'plain', 'utf-8')
+            message['From'] = Header(f"WPS签到助手 <{user}>", 'utf-8')
+            message['To'] = Header(to_addr, 'utf-8')
+            message['Subject'] = Header(title, 'utf-8')
+
+            # 连接SMTP服务器
+            if port == 465:
+                smtp = smtplib.SMTP_SSL(host, port, timeout=timeout)
+            else:
+                smtp = smtplib.SMTP(host, port, timeout=timeout)
+                smtp.starttls()
+            
+            smtp.login(user, password)
+            smtp.sendmail(user, [to_addr], message.as_string())
+            smtp.quit()
+            
+            self.logger.info("✅ 邮件推送成功")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ 邮件推送异常: {e}")
             return False
 
 

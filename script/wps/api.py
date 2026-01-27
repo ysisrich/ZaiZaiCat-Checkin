@@ -148,7 +148,7 @@ class WPSAPI:
         return cookies
 
     def get_user_info(self, activity_number: str = "HD2025031821201822",
-                      page_number: str = "YM2025041617143388") -> Dict:
+                      page_number: str = "YM2025031821202008") -> Dict:
         """
         获取用户个人信息，包括抽奖次数和积分
 
@@ -176,7 +176,7 @@ class WPSAPI:
         try:
             # 构造请求头
             headers = self.base_headers.copy()
-            headers['referer'] = f'https://personal-act.wps.cn/rubik2/portal/{activity_number}/{page_number}?cs_from=&mk_key=JkVKsOtv4aCLMdNdAKwUGoz9tfKeFZVKyjEe&position=mac_grzx_sign'
+            headers['referer'] = f'https://personal-act.wps.cn/rubik2/portal/{activity_number}/{page_number}?cs_from=&mk_key=4b9dgIxiksbUzBO6pGTyaZgGnAyBJlWN4oi&position=pc_grzx_sign'
             headers['sec-fetch-site'] = 'same-origin'
             headers['sec-fetch-mode'] = 'cors'
             headers['sec-fetch-dest'] = 'empty'
@@ -498,7 +498,7 @@ class WPSAPI:
             }
 
     def lottery(self, activity_number: str = "HD2025031821201822",
-                    page_number: str = "YM2025041617143388",
+                    page_number: str = "YM2025031821202008",
                     component_number: str = "ZJ2025092916515917",
                     component_node_id: str = "FN1762346087mJlk",
                     session_id: int = 2) -> Dict:
@@ -528,7 +528,7 @@ class WPSAPI:
             try:
                 # 构造请求头
                 headers = self.base_headers.copy()
-                headers['referer'] = f'https://personal-act.wps.cn/rubik2/portal/{activity_number}/{page_number}?cs_from=&mk_key=JkVKsOtv4aCLMdNdAKwUGoz9tfKeFZVKyjEe&position=mac_grzx_sign'
+                headers['referer'] = f'https://personal-act.wps.cn/rubik2/portal/{activity_number}/{page_number}?cs_from=&mk_key=4b9dgIxiksbUzBO6pGTyaZgGnAyBJlWN4oi&position=pc_grzx_sign'
                 headers['sec-fetch-site'] = 'same-origin'
                 headers['sec-fetch-mode'] = 'cors'
                 headers['sec-fetch-dest'] = 'empty'
@@ -541,8 +541,8 @@ class WPSAPI:
                         "component_node_id": component_node_id,
                         "filter_params": {
                             "cs_from": "",
-                            "mk_key": "JkVKsOtv4aCLMdNdAKwUGoz9tfKeFZVKyjEe",
-                            "position": "mac_grzx_sign"
+                            "mk_key": "4b9dgIxiksbUzBO6pGTyaZgGnAyBJlWN4oi",
+                            "position": "pc_grzx_sign"
                         }
                     },
                     "component_type": 45,
