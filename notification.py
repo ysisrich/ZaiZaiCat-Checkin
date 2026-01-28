@@ -757,8 +757,16 @@ class NotificationManager:
             
             # 构造邮件内容
             message = MIMEText(content, 'plain', 'utf-8')
-            message['From'] = Header(f"WPS签到助手 <{user}>", 'utf-8')
-            message['To'] = Header(to_addr, 'utf-8')
+            
+            # RFC 5322 compliant headers
+            from_header = Header(f"WPS签到助手", 'utf-8')
+            from_header.append(f"<{user}>", 'ascii')
+            message['From'] = from_header
+            
+            to_header = Header(f"用户", 'utf-8')
+            to_header.append(f"<{to_addr}>", 'ascii')
+            message['To'] = to_header
+            
             message['Subject'] = Header(title, 'utf-8')
 
             # 连接SMTP服务器
@@ -803,9 +811,13 @@ class NotificationManager:
             return False
 
         bark_push = self.bark_config.get('push')
-        base_url = self.bark_config.get('url', 'https://api.day.app').rstrip('/')
+        base_url = self.bark_config.get('url') or 'https://api.day.app'
+        base_url = base_url.rstrip('/')
 
-        url_path = f"{base_url}/{bark_push}" if not bark_push.startswith('http') else bark_push
+        if bark_push.startswith('http'):
+            url_path = bark_push
+        else:
+            url_path = f"{base_url}/{bark_push}"
 
         data = {
             "title": title,
