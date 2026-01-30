@@ -68,7 +68,7 @@ class WPSTasks:
         logger.setLevel(logging.INFO)
 
         # 创建控制台处理器
-        console_handler = logging.StreamHandler()
+        console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
 
         # 设置日志格式
@@ -484,16 +484,38 @@ class WPSTasks:
         try:
             send_notification(
                 title=title,
-                content=content,
-                sound=NotificationSound.BIRDSONG
+                content=content
             )
             self.logger.info("✅ 推送通知已发送")
         except Exception as e:
             self.logger.warning(f"⚠️ 发送推送通知失败: {str(e)}")
 
 
+import os
+import random
+import time
+
 def main():
     """主函数"""
+    # 随机延迟逻辑
+    max_random_delay = int(os.getenv("MAX_RANDOM_DELAY", "600"))
+    if max_random_delay > 0:
+        delay_seconds = random.randint(0, max_random_delay)
+        print(f"🎲 随机模式: 延迟 {delay_seconds} 秒后开始")
+        
+        remaining = delay_seconds
+        while remaining > 0:
+            if remaining % 60 == 0 or remaining <= 5:
+                print(f"⏳ 还需等待 {remaining} 秒...")
+            
+            sleep_time = 1 if remaining <= 5 else min(10, remaining)
+            # 如果剩余时间是整分，且大于10秒，sleep后保持整分打印的逻辑可能需要微调，
+            # 但这里简单 sleep 即可。
+            # 为了更好的体验，如果 remaining > 60，sleep 1秒检查一次或者直接 sleep step。
+            # 简单实现：
+            time.sleep(sleep_time)
+            remaining -= sleep_time
+
     try:
         # 创建任务执行器
         tasks = WPSTasks()

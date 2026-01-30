@@ -512,8 +512,7 @@ class SFTasksManager:
             # 发送推送
             send_notification(
                 title=title,
-                content=content,
-                sound=NotificationSound.BIRDSONG
+                content=content
             )
             logger.info(f"✅ {self.site_name}任务汇总推送发送成功")
 

@@ -759,7 +759,7 @@ class NotificationManager:
             message = MIMEText(content, 'plain', 'utf-8')
             
             # RFC 5322 compliant headers
-            from_header = Header(f"WPS签到助手", 'utf-8')
+            from_header = Header(f"签到助手", 'utf-8')
             from_header.append(f"<{user}>", 'ascii')
             message['From'] = from_header
             
